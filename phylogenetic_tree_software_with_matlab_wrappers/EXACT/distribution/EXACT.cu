@@ -7,6 +7,7 @@
 #include <omp.h>
 #include <sys/resource.h>
 #include <sys/time.h>
+#include <string.h>
 
 // we probably will never consider trees with more than 13 nodes so we can use this number as a fixed bound which helps optimize the code
 #define MAX_N_NODES 13
@@ -3604,8 +3605,9 @@ int main(int argc, const char * argv[]) {
     // Allocate arrays for top k trees for all OpenMP thread:
     realnumber *max_heap_mp = (realnumber *) malloc(k * num_threads_for_openmp * sizeof(realnumber));
     longint *smallest_trees_mp = (longint *) malloc(k * num_threads_for_openmp * sizeof(longint));
-    realnumber *max_heap_mp_with_regularization_mp = (realnumber *) malloc(n_reg_params * k * num_threads_for_openmp * sizeof(realnumber));
-    longint *smalleset_trees_with_regularization_mp = (longint *) malloc(n_reg_params * k * num_threads_for_openmp * sizeof(longint));
+    // Allocate for regularization step 
+    realnumber max_heap_with_regularization_mp[num_threads_for_openmp][n_reg_params * k];
+    longint smallest_trees_with_regularization_mp[num_threads_for_openmp][n_reg_params * k];
 
     for (shortint i = 0; i < k * num_threads_for_openmp; ++i) {
         max_heap_mp[i] = 100 * k * num_threads_for_openmp - i;
@@ -3669,9 +3671,9 @@ int main(int argc, const char * argv[]) {
                 
                 // Top k stuff for each thread:
                 realnumber max_heap_curr[k];
-                realnumber list_of_maxheaps_foreach_regularization_param[n_reg_params * k];
+                realnumber list_of_maxheaps_foreach_regularization_param[n_reg_params][k];
                 longint smallest_trees_curr[k];
-                longint list_of_smallest_trees_foreach_regularization_param[n_reg_params * k];
+                longint list_of_smallest_trees_foreach_regularization_param[n_reg_params][k];
                 for (shortint i = 0; i < k; ++i) {
                     max_heap_curr[i] = 10 * MAX_N_NODES * k + i;
                     smallest_trees_curr[i] = 0;
@@ -3701,7 +3703,7 @@ int main(int argc, const char * argv[]) {
                                 break;
                             case '5';
                                 for (int x = 0; x < n_reg_params; ++x) {
-                                    // costs[x] += array_of_maxheaps_curr[]
+                                    // Call_to_path_algorithm(costs, ...);
                                 } 
                                 break;
                             default:
@@ -3712,7 +3714,7 @@ int main(int argc, const char * argv[]) {
 
                     if (cost_choice == '5') {
                         for (int x = 0; x < n_reg_params; ++x) {
-                            heapify(costs[x], local_tree_index, list_of_maxheaps_foreach_regularization_param + (x * k), list_of_smallest_trees_foreach_regularization_param + (x * k), k);
+                            heapify(costs[x], local_tree_index, list_of_maxheaps_foreach_regularization_param[x], list_of_smallest_trees_foreach_regularization_param[x], k);
                         }
                     }
                     else if (cost == cost && cost < max_heap_curr[0]) { // Avoid NaN
@@ -3730,14 +3732,11 @@ int main(int argc, const char * argv[]) {
                         //smallest_trees_mp[thread_id * k + i] = smallest_trees_curr[i];
                     }
                 } 
-                else { // For case with solving full path and interpolating: 
-                    for (shortint i = 0; i < k; ++i) {
-                        // max_heap_mp[thread_id + i * num_threads_for_openmp] = max_heap_curr[i]; // part_num = thread index
-                        // smallest_trees_mp[thread_id + i * num_threads_for_openmp] = smallest_trees_curr[i];
-                        //max_heap_mp[thread_id * k + i] = max_heap_curr[i]; // part_num = thread index
-                        //smallest_trees_mp[thread_id * k + i] = smallest_trees_curr[i];
-                        max_heap_mp_with_regularization_mp[thread_id + i * num_threads_for_openmp];
-                        smalleset_trees_with_regularization_mp[thread_id + i * num_threads_for_openmp];
+                // For case with solving full path and interpolating: 
+                else { 
+                    for (int x = 0; x < n_reg_params; ++x) {
+                        memcpy(smallest_trees_with_regularization_mp[thread_id] + (x*k), list_of_smallest_trees_foreach_regularization_param[x], sizeof(longint) * k);
+                        memcpy(max_heap_with_regularization_mp[thread_id] + (x*k), list_of_maxheaps_foreach_regularization_param[x], sizeof(realnumber) * k);
                     }
                 }
             }
