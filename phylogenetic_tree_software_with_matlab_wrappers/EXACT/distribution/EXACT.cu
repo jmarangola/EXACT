@@ -3599,7 +3599,7 @@ int main(int argc, const char * argv[]) {
     // Set regularization parameters for Path Algorithm 
     const shortint n_reg_params = 20;
     const realnumber rho_min=0, rho_max=1;
-    realnumber regularization_parameters = (realnumber * ) malloc(n_reg_params);
+    realnumber *regularization_parameters = (realnumber * ) malloc(n_reg_params);
     for (int x = 0; x < n_reg_params; ++x) regularization_parameters[x] = x * (realnumber)((rho_max - rho_min) / n_reg_params); // linearly spaced regularization values to start??
 
     // Allocate arrays for top k trees for all OpenMP thread:
@@ -3701,7 +3701,7 @@ int main(int argc, const char * argv[]) {
                             case '4':
                                 cost += cost_trans_function(tree_cost_inner(num_tree_vertices, T, input_data, root_node, tree, local_adjacency_mat, local_final_degrees, local_adjacency_list));
                                 break;
-                            case '5';
+                            case '5':
                                 for (int x = 0; x < n_reg_params; ++x) {
                                     // Call_to_path_algorithm(costs, ...);
                                 } 
