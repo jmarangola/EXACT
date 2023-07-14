@@ -3594,10 +3594,19 @@ int main(int argc, const char * argv[]) {
     // Create space for the adjacency list
     shortint *final_degrees = (shortint *) malloc( num_tree_vertices * sizeof(shortint) );
     shortint* adjacency_list = (shortint *) malloc(num_tree_vertices*num_tree_vertices*sizeof(shortint)); // we are over initializing
-    
+
+    // Set regularization parameters for Path Algorithm 
+    const shortint n_reg_params = 20;
+    const realnumber rho_min=0, rho_max=1;
+    realnumber regularization_parameters = (realnumber * ) malloc(n_reg_params);
+    for (int x = 0; x < n_reg_params; ++x) regularization_parameters[x] = x * (realnumber)((rho_max - rho_min) / n_reg_params); // linearly spaced regularization values to start??
+
     // Allocate arrays for top k trees for all OpenMP thread:
     realnumber *max_heap_mp = (realnumber *) malloc(k * num_threads_for_openmp * sizeof(realnumber));
     longint *smallest_trees_mp = (longint *) malloc(k * num_threads_for_openmp * sizeof(longint));
+    realnumber *max_heap_mp_with_regularization_mp = (realnumber *) malloc(n_reg_params * k * num_threads_for_openmp * sizeof(realnumber));
+    longint *smalleset_trees_with_regularization_mp = (longint *) malloc(n_reg_params * k * num_threads_for_openmp * sizeof(longint));
+
     for (shortint i = 0; i < k * num_threads_for_openmp; ++i) {
         max_heap_mp[i] = 100 * k * num_threads_for_openmp - i;
         smallest_trees_mp[i] = 0;
@@ -3615,7 +3624,6 @@ int main(int argc, const char * argv[]) {
                 
                 realnumber cost = 0;
                 cost  = tree_prior(num_tree_vertices, adjacency_mat, adjacency_list, final_degrees); //here we include a prior cost on the tree  
-                
                 if (cost < 10000){
                     switch (cost_choice) {
                         case '1':
@@ -3628,7 +3636,7 @@ int main(int argc, const char * argv[]) {
                             cost += cost_trans_function(tree_cost(num_tree_vertices, T, input_data, root_node, tree, adjacency_mat, final_degrees, adjacency_list));
                             break;
                         case '4':
-                            cost +=cost_trans_function(tree_cost_inner(num_tree_vertices, T, input_data, root_node, tree, adjacency_mat, final_degrees, adjacency_list));
+                            cost += cost_trans_function(tree_cost_inner(num_tree_vertices, T, input_data, root_node, tree, adjacency_mat, final_degrees, adjacency_list));
                             break;
                         default:
                             printf("Invalid cost choice!\n");
@@ -3645,7 +3653,9 @@ int main(int argc, const char * argv[]) {
         else if (device_choice == 'M') {
 
             // ************************* START OF MULTI CORE CODE **********************************
-
+            realnumber costs[n_reg_params];
+            memset(costs, 0, sizeof(realnumber) * n_reg_params);
+            
             realnumber start = omp_get_wtime();
             #pragma omp parallel for //schedule(static)
             for (int part_num = 0; part_num < num_threads_for_openmp; part_num++){
@@ -3659,7 +3669,9 @@ int main(int argc, const char * argv[]) {
                 
                 // Top k stuff for each thread:
                 realnumber max_heap_curr[k];
+                realnumber list_of_maxheaps_foreach_regularization_param[n_reg_params * k];
                 longint smallest_trees_curr[k];
+                longint list_of_smallest_trees_foreach_regularization_param[n_reg_params * k];
                 for (shortint i = 0; i < k; ++i) {
                     max_heap_curr[i] = 10 * MAX_N_NODES * k + i;
                     smallest_trees_curr[i] = 0;
@@ -3687,25 +3699,46 @@ int main(int argc, const char * argv[]) {
                             case '4':
                                 cost += cost_trans_function(tree_cost_inner(num_tree_vertices, T, input_data, root_node, tree, local_adjacency_mat, local_final_degrees, local_adjacency_list));
                                 break;
+                            case '5';
+                                for (int x = 0; x < n_reg_params; ++x) {
+                                    // costs[x] += array_of_maxheaps_curr[]
+                                } 
+                                break;
                             default:
                                 printf("Invalid cost choice!\n");
                                 break;
                         }
                     }
 
-                    
-                    if (cost == cost && cost < max_heap_curr[0]) { // Avoid NaN
+                    if (cost_choice == '5') {
+                        for (int x = 0; x < n_reg_params; ++x) {
+                            heapify(costs[x], local_tree_index, list_of_maxheaps_foreach_regularization_param + (x * k), list_of_smallest_trees_foreach_regularization_param + (x * k), k);
+                        }
+                    }
+                    else if (cost == cost && cost < max_heap_curr[0]) { // Avoid NaN
                         heapify(cost, local_tree_index, max_heap_curr, smallest_trees_curr, k);
                     }
                 }
                 
                 // Write top k stuff to global memory:
                 longint thread_id = omp_get_thread_num();
-                for (shortint i = 0; i < k; ++i) {
-                    max_heap_mp[thread_id + i * num_threads_for_openmp] = max_heap_curr[i]; // part_num = thread index
-                    smallest_trees_mp[thread_id + i * num_threads_for_openmp] = smallest_trees_curr[i];
-                    //max_heap_mp[thread_id * k + i] = max_heap_curr[i]; // part_num = thread index
-                    //smallest_trees_mp[thread_id * k + i] = smallest_trees_curr[i];
+                if (cost_choice != '5') {
+                    for (shortint i = 0; i < k; ++i) {
+                        max_heap_mp[thread_id + i * num_threads_for_openmp] = max_heap_curr[i]; // part_num = thread index
+                        smallest_trees_mp[thread_id + i * num_threads_for_openmp] = smallest_trees_curr[i];
+                        //max_heap_mp[thread_id * k + i] = max_heap_curr[i]; // part_num = thread index
+                        //smallest_trees_mp[thread_id * k + i] = smallest_trees_curr[i];
+                    }
+                } 
+                else { // For case with solving full path and interpolating: 
+                    for (shortint i = 0; i < k; ++i) {
+                        // max_heap_mp[thread_id + i * num_threads_for_openmp] = max_heap_curr[i]; // part_num = thread index
+                        // smallest_trees_mp[thread_id + i * num_threads_for_openmp] = smallest_trees_curr[i];
+                        //max_heap_mp[thread_id * k + i] = max_heap_curr[i]; // part_num = thread index
+                        //smallest_trees_mp[thread_id * k + i] = smallest_trees_curr[i];
+                        max_heap_mp_with_regularization_mp[thread_id + i * num_threads_for_openmp];
+                        smalleset_trees_with_regularization_mp[thread_id + i * num_threads_for_openmp];
+                    }
                 }
             }
             realnumber end = omp_get_wtime();
@@ -3907,6 +3940,8 @@ int main(int argc, const char * argv[]) {
     free(final_degrees);
     free(max_heap_mp);
     free(smallest_trees_mp);
+
+    free(regularization_parameters);
     
     // Close files:
     fclose(input_file);
